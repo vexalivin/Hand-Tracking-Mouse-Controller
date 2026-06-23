@@ -1,3 +1,4 @@
+import keyboard
 from mediapipe.tasks.python.vision.drawing_utils import DrawingSpec, draw_landmarks
 from mediapipe.tasks.python.vision import (
     HandLandmarker,
@@ -23,7 +24,7 @@ import urllib.request
 
 SCAN_TO_EN = {}
 
-# --- Friendly import error handling ---
+# Import error handling
 _missing = []
 for mod, pip_name in [("cv2", "opencv-python"), ("mediapipe", "mediapipe"),
                       ("pyautogui", "pyautogui"), ("sv_ttk", "sv-ttk"),
@@ -41,9 +42,8 @@ if _missing:
     input("\nPress Enter to exit...")
     sys.exit(1)
 
-import keyboard
 
-# Build layout-independent scan code → English key name mapping
+# English key name mapping
 keyboard._os_keyboard.init()
 _sc2vk = keyboard._os_keyboard.scan_code_to_vk
 _vks = keyboard._os_keyboard.official_virtual_keys
@@ -151,9 +151,6 @@ def move_mouse_to(x, y):
     _send_mouse_abs(x, y, MOUSEEVENTF_MOVE)
 
 
-
-
-
 def rounded_rect(img, p1, p2, color, thickness=2, r=10):
     x1, y1 = p1
     x2, y2 = p2
@@ -252,7 +249,7 @@ def ensure_model():
     print("Download complete.")
 
 
-# --- Config persistence ---
+# Config persistence
 
 def save_config(data, path=RULES_PATH):
     with open(path, "w") as f:
@@ -278,7 +275,8 @@ def load_config(path=RULES_PATH):
             # backward compat: convert frames to ms
             track = data.get("tracking", {})
             if "click_hold_frames" in track and "click_hold_ms" not in track:
-                track["click_hold_ms"] = int(track.pop("click_hold_frames") * 33.33)
+                track["click_hold_ms"] = int(
+                    track.pop("click_hold_frames") * 33.33)
             track.setdefault("click_hold_ms", 267)
             return data
     return None
@@ -296,7 +294,7 @@ def default_config():
     }
 
 
-# --- Settings window ---
+# Settings window
 
 class SettingsWindow:
     def __init__(self, config, config_lock, feedback_queue, cam_list):
@@ -362,12 +360,14 @@ class SettingsWindow:
         lm_cb.bind("<<ComboboxSelected>>",
                    lambda e: self._on_tracking_change())
 
-        ttk.Label(track_frame, text="  Hold delay (ms):").pack(side="left", padx=(5, 2))
+        ttk.Label(track_frame, text="  Hold delay (ms):").pack(
+            side="left", padx=(5, 2))
         self.click_hold_var = tk.StringVar(value="267")
         hold_entry = ttk.Entry(track_frame, textvariable=self.click_hold_var,
                                width=5, justify="center")
         hold_entry.pack(side="left")
-        hold_entry.bind("<KeyRelease>", lambda e=None: self._on_click_hold_change())
+        hold_entry.bind(
+            "<KeyRelease>", lambda e=None: self._on_click_hold_change())
 
         ttk.Label(track_frame, text="  Camera:").pack(side="left", padx=(5, 2))
         self.cam_var = tk.StringVar()
@@ -645,7 +645,8 @@ class SettingsWindow:
                     if peak:
                         combo = "+".join(peak)
                         recording["captured"] = combo
-                        dialog.after(0, lambda: (key_label.configure(text=combo), stop_recording()))
+                        dialog.after(0, lambda: (
+                            key_label.configure(text=combo), stop_recording()))
 
         record_btn = ttk.Button(key_frame, text="Record", width=8,
                                 command=lambda: start_recording() if not recording["active"] else stop_recording())
@@ -733,7 +734,7 @@ class SettingsWindow:
         self.root.destroy()
 
 
-# --- Camera / engine thread ---
+# Camera / engine thread
 
 def camera_thread(config, config_lock, feedback_queue):
     ensure_model()
@@ -846,7 +847,8 @@ def camera_thread(config, config_lock, feedback_queue):
                 tracking_hand = track_cfg.get("hand", "right")
                 tracking_idx = track_cfg.get(
                     "landmark", 9) if tracking_enabled else None
-                click_hold = max(1, int(track_cfg.get("click_hold_ms", 267) / 33.33))
+                click_hold = max(
+                    1, int(track_cfg.get("click_hold_ms", 267) / 33.33))
 
             if result.hand_landmarks and result.handedness:
                 for hand_idx, hand_landmarks in enumerate(result.hand_landmarks):
@@ -950,7 +952,8 @@ def camera_thread(config, config_lock, feedback_queue):
                                         one_shot_guard[rid] = False
                                 else:
                                     if rid not in drag_state:
-                                        drag_state[rid] = {"state": "idle", "start_frame": 0}
+                                        drag_state[rid] = {
+                                            "state": "idle", "start_frame": 0}
                                     ds = drag_state[rid]
                                     if btn == "left":
                                         _down, _up, _click = send_left_down, send_left_up, send_left_click
