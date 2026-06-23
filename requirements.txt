@@ -1,3 +1,5 @@
 opencv-python
 mediapipe
 pyautogui
+sv-ttk
+keyboard

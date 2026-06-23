@@ -4,3 +4,4 @@ __pycache__/
 .vscode/
 .idea/
 *.log
+gesture_rules.json
