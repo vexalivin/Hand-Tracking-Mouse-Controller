@@ -1,4 +1,4 @@
-# Hand Tracking Mouse Controller (DOESNT WORK FOR NOW, CURRENTLY ON FIXING STAGE)
+# Hand Tracking Mouse Controller
 
 Controls your PC mouse using hand gestures via webcam. Built with OpenCV,
 MediaPipe Tasks API, and ctypes `SendInput` for mouse/keyboard injection.
