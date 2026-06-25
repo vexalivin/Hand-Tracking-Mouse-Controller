@@ -58,8 +58,7 @@ py main.py
 
 ## Controls
 
-- Press **Q** or close the camera window to quit.
-- Close the settings window to stop tracking.
+- Close the camera window to stop tracking.
 
 ## How Gesture Rules Work
 
