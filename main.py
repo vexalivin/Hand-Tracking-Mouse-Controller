@@ -1,4 +1,5 @@
 import keyboard
+import numpy as np
 from mediapipe.tasks.python.vision.drawing_utils import DrawingSpec, draw_landmarks
 from mediapipe.tasks.python.vision import (
     HandLandmarker,
@@ -188,25 +189,30 @@ pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = True
 
 ACTION_OPTIONS = ["Left Click", "Right Click",
-                  "Middle Click", "Active Drag", "Custom Key..."]
+                  "Middle Click", "Custom Key..."]
 LANDMARK_IDS = [str(i) for i in range(21)]
 
 
 def list_available_cameras():
     available = []
-    for i in range(10):
-        cap = None
-        try:
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                available.append((i, w, h))
-        except Exception:
-            pass
-        finally:
-            if cap:
-                cap.release()
+    # Suppress OpenCV obsensor errors during probing
+    cv2.redirectError(lambda *args: (0, ''))
+    try:
+        for i in range(10):
+            cap = None
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    available.append((i, w, h))
+            except Exception:
+                pass
+            finally:
+                if cap:
+                    cap.release()
+    finally:
+        cv2.redirectError(None)
 
     wmi_names = {}
     if available:
@@ -233,11 +239,7 @@ def list_available_cameras():
     result = []
     for i, w, h in available:
         label = wmi_names.get(len(result), f"Camera {i}")
-        result.append((i, f"[{i}] {label} ({w}x{h})"))
-    return result
-    for i, w, h in available:
-        label = wmi_names.get(len(result), f"Camera {i}")
-        result.append((i, f"[{i}] {label} ({w}x{h})"))
+        result.append((i, f"[{i}] {label}"))
     return result
 
 
@@ -312,6 +314,9 @@ class SettingsWindow:
         self.root.tk.call("wm", "iconphoto", self.root._w, self._blank_icon)
         sv_ttk.set_theme("dark")
 
+        self._visible = False
+        self.root.withdraw()
+
         self._build_ui()
         self._rebuild_listbox()
         self.root.update_idletasks()
@@ -373,10 +378,12 @@ class SettingsWindow:
         self.cam_var = tk.StringVar()
         cam_values = [lbl for _,
                       lbl in self.cam_list] if self.cam_list else ["0"]
-        cam_cb = ttk.Combobox(track_frame, textvariable=self.cam_var,
-                              values=cam_values, width=30, state="readonly")
-        cam_cb.pack(side="left")
-        cam_cb.bind("<<ComboboxSelected>>", lambda e: self._on_camera_change())
+        self.cam_cb = ttk.Combobox(track_frame, textvariable=self.cam_var,
+                                   values=cam_values, width=30, state="readonly")
+        self.cam_cb.pack(side="left")
+        self.cam_cb.bind("<<ComboboxSelected>>", lambda e: self._on_camera_change())
+        ttk.Button(track_frame, text="\u21bb", width=3,
+                   command=self._scan_cameras).pack(side="left", padx=(2, 0))
 
         self.listbox = tk.Listbox(self.root, height=8, font=("Consolas", 10))
         self.listbox.pack(fill="both", expand=True, padx=10, pady=(5, 0))
@@ -463,6 +470,16 @@ class SettingsWindow:
         with self.config_lock:
             self.config["camera_index"] = idx
         self._save_full()
+
+    def _scan_cameras(self):
+        def scan():
+            new_list = list_available_cameras()
+            self.root.after(0, lambda: self._apply_cam_list(new_list))
+        threading.Thread(target=scan, daemon=True).start()
+
+    def _apply_cam_list(self, new_list):
+        self.cam_list = new_list
+        self._refresh_cam_dropdown()
 
     def _save_full(self):
         with self.config_lock:
@@ -712,26 +729,59 @@ class SettingsWindow:
             side="left", padx=5)
 
     def _poll_feedback(self):
+        with self.config_lock:
+            if self.config.get("shutdown"):
+                self.root.destroy()
+                return
         try:
             while True:
-                name = self.feedback_queue.get_nowait()
-                if name is None:
+                msg = self.feedback_queue.get_nowait()
+                if msg is None:
                     self.status_canvas.itemconfig(self.status_dot, fill="gray")
                     self.status_label.config(text="---")
+                elif isinstance(msg, tuple) and msg[0] == "toggle_settings":
+                    self._toggle_settings()
+                elif isinstance(msg, tuple) and msg[0] == "cam_list":
+                    self.cam_list = msg[1]
+                    self._refresh_cam_dropdown()
+                elif isinstance(msg, tuple) and msg[0] == "auto_select":
+                    self._auto_select_camera(msg[1])
                 else:
                     self.status_canvas.itemconfig(
                         self.status_dot, fill="#00cc00")
-                    self.status_label.config(text=name)
+                    self.status_label.config(text=msg)
                     self.root.after(150, lambda: self.status_canvas.itemconfig(
                         self.status_dot, fill="gray"))
         except queue.Empty:
             pass
         self.root.after(50, self._poll_feedback)
 
+    def _refresh_cam_dropdown(self):
+        values = [lbl for _, lbl in self.cam_list] if self.cam_list else ["0"]
+        self.cam_cb.configure(values=values)
+        current = self.cam_var.get()
+        if current not in values:
+            self.cam_var.set(values[0] if values else "0")
+
+    def _toggle_settings(self):
+        if self._visible:
+            self.root.withdraw()
+            self._visible = False
+        else:
+            self.root.deiconify()
+            self.root.lift()
+            self._visible = True
+
     def on_close(self):
-        with self.config_lock:
-            self.config["shutdown"] = True
-        self.root.destroy()
+        self.root.withdraw()
+        self._visible = False
+
+    def _auto_select_camera(self, idx):
+        for i, lbl in (self.cam_list or []):
+            if i == idx:
+                self.cam_var.set(lbl)
+                self._on_camera_change()
+                return
 
 
 # Camera / engine thread
@@ -758,6 +808,17 @@ def camera_thread(config, config_lock, feedback_queue):
     cv2.namedWindow("Hand Tracker", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Hand Tracker", cam_w, cam_h)
     cv2.setWindowProperty("Hand Tracker", cv2.WND_PROP_TOPMOST, 1)
+
+    settings_btn_rect = {"x": 10, "y": 10, "w": 100, "h": 30}
+    _clicked = [False]
+
+    def _mouse_cb(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONUP:
+            r = settings_btn_rect
+            if r["x"] <= x <= r["x"] + r["w"] and r["y"] <= y <= r["y"] + r["h"]:
+                _clicked[0] = True
+
+    cv2.setMouseCallback("Hand Tracker", _mouse_cb)
 
     options = HandLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=MODEL_PATH),
@@ -795,6 +856,33 @@ def camera_thread(config, config_lock, feedback_queue):
         with config_lock:
             return config.get("shutdown", False)
 
+    def _gray_frame(w, h, text):
+        gray = np.full((h, w, 3), (60, 60, 60), dtype=np.uint8)
+        cv2.putText(gray, text, (w // 2 - 80, h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (180, 180, 180), 2)
+        return gray
+
+    _scan_lock = threading.Lock()
+    def _scan_cameras_async():
+        if not _scan_lock.acquire(blocking=False):
+            return
+        def _scan():
+            try:
+                new_list = list_available_cameras()
+                feedback_queue.put(("cam_list", new_list))
+                with config_lock:
+                    cur = config.get("camera_index", 0)
+                    cur_valid = any(i == cur for i, _ in new_list)
+                    if not cur_valid and new_list:
+                        new_idx = new_list[0][0]
+                        config["camera_index"] = new_idx
+                        feedback_queue.put(("cam_list", new_list))
+                if not cur_valid and new_list:
+                    feedback_queue.put(("auto_select", new_idx))
+            finally:
+                _scan_lock.release()
+        threading.Thread(target=_scan, daemon=True).start()
+
     try:
         while not is_shutdown():
             new_idx = _cam_index()
@@ -809,18 +897,25 @@ def camera_thread(config, config_lock, feedback_queue):
                     cv2.resizeWindow("Hand Tracker", cam_w, cam_h)
 
             if cap is None:
-                cv2.waitKey(100)
-                continue
+                frame = _gray_frame(cam_w, cam_h, "No camera")
+                has_frame = False
+            else:
+                success, frame = cap.read()
+                if not success:
+                    cap.release()
+                    cap = None
+                    frame = _gray_frame(cam_w, cam_h, "No camera")
+                    has_frame = False
+                    _scan_cameras_async()
+                else:
+                    has_frame = True
 
-            success, frame = cap.read()
-            if not success:
-                break
-
-            frame = cv2.flip(frame, 1)
-            frame_timestamp += 1
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = landmarker.detect_for_video(mp_image, frame_timestamp)
+            if has_frame:
+                frame = cv2.flip(frame, 1)
+                frame_timestamp += 1
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                result = landmarker.detect_for_video(mp_image, frame_timestamp)
 
             margin = (1.0 - BOX_FRACTION) / 2.0
             b_lft = margin
@@ -850,7 +945,7 @@ def camera_thread(config, config_lock, feedback_queue):
                 click_hold = max(
                     1, int(track_cfg.get("click_hold_ms", 267) / 33.33))
 
-            if result.hand_landmarks and result.handedness:
+            if has_frame and result.hand_landmarks and result.handedness:
                 for hand_idx, hand_landmarks in enumerate(result.hand_landmarks):
                     if hand_idx >= len(result.handedness) or not result.handedness[hand_idx]:
                         continue
@@ -1154,6 +1249,17 @@ def camera_thread(config, config_lock, feedback_queue):
             y2 = int(b_bot * cam_h)
             rounded_rect(frame, (x1, y1), (x2, y2), box_color, 2, r=12)
 
+            # Settings button
+            r = settings_btn_rect
+            for dx, dy in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                cv2.putText(frame, "Settings", (r["x"] + 8 + dx, r["y"] + 21 + dy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            cv2.putText(frame, "Settings", (r["x"] + 8, r["y"] + 21),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1)
+            if _clicked[0]:
+                _clicked[0] = False
+                feedback_queue.put(("toggle_settings",))
+
             cv2.imshow("Hand Tracker", frame)
             key = cv2.waitKey(1)
             if key & 0xFF == ord("q") or cv2.getWindowProperty("Hand Tracker", cv2.WND_PROP_VISIBLE) < 1:
@@ -1163,12 +1269,13 @@ def camera_thread(config, config_lock, feedback_queue):
 
     finally:
         for hk in held_keys.values():
-            if hk.get("active") and hk.get("keys"):
+            if hk.get("state") in ("pending", "active") and hk.get("keys"):
                 for p in reversed(hk["keys"]):
                     keyboard.release(p)
         feedback_queue.put(None)
         landmarker.close()
-        cap.release()
+        if cap:
+            cap.release()
         cv2.destroyAllWindows()
 
 
@@ -1192,6 +1299,11 @@ def main():
     feedback_queue = queue.Queue()
 
     cam_list = list_available_cameras()
+    cam_idx = data.get("camera_index", 0)
+    if not any(i == cam_idx for i, _ in cam_list):
+        cam_idx = cam_list[0][0] if cam_list else 0
+
+    config["camera_index"] = cam_idx
 
     cam_thread = threading.Thread(
         target=camera_thread, args=(
