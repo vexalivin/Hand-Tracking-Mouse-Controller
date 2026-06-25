@@ -83,3 +83,9 @@ circle radius; when the circles overlap, the gesture triggers.
 | `hand_landmarker.task` | MediaPipe model (auto-downloaded) |
 | `gesture_rules.json` | User-defined rules (auto-created, gitignored) |
 | `requirements.txt` | Python dependencies |
+
+## Platform
+
+Windows only. The program uses `ctypes.windll.user32.SendInput` for mouse
+injection and the `keyboard` library's Windows scan-code layer. macOS and
+Linux are not supported.
